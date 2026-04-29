@@ -1,0 +1,42 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Packaging / build artifacts
+build/
+dist/
+*.spec
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.tox/
+
+# IDEs / editors
+.vscode/
+.idea/
+
+# Cursor
+.cursor/
+
+# Windows / misc
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# Logs
+*.log
