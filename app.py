@@ -9,7 +9,6 @@ from ctypes import wintypes
 from pynput import keyboard, mouse
 
 # Windows: echte relative Maus-Deltas per SendInput (wie Hardware), nicht nur Desktop-Cursor.
-# Wichtig für Spiele (z. B. Minecraft-Kamera / Raw Input).
 INPUT_MOUSE = 0
 MOUSEEVENTF_MOVE = 0x0001
 
@@ -83,11 +82,15 @@ class MacroApp:
         self._mouse_controller = mouse.Controller()
         self._kb_listener: keyboard.Listener | None = None
         self._mouse_listener: mouse.Listener | None = None
+
         self._left_down = False
+        self._right_down = False  # <-- NEU
         self._accum_y = 0.0
+
         self._state_lock = threading.Lock()
         self._macro_enabled = False
         self._macro_speed = 120
+
         self._stop_smooth = threading.Event()
         self._smooth_thread = threading.Thread(target=self._smooth_drag_loop, daemon=True)
 
@@ -101,7 +104,7 @@ class MacroApp:
         frame = ttk.Frame(self.root, padding=14)
         frame.grid(row=0, column=0, sticky="nsew")
 
-        title = ttk.Label(frame, text="Maus flüssig nach unten (Linke Taste halten)", font=("Segoe UI", 11, "bold"))
+        title = ttk.Label(frame, text="Maus flüssig nach unten (L+R halten)", font=("Segoe UI", 11, "bold"))
         title.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
         enabled = ttk.Checkbutton(
@@ -113,6 +116,7 @@ class MacroApp:
         enabled.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
         ttk.Label(frame, text="Geschwindigkeit (Pixel/Sekunde):").grid(row=2, column=0, sticky="w")
+
         slider = ttk.Scale(
             frame,
             from_=10,
@@ -129,25 +133,11 @@ class MacroApp:
         status = ttk.Label(frame, textvariable=self.status_var)
         status.grid(row=4, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
-        hint = ttk.Label(
-            frame,
-            text=(
-                "Relative Low-Level-Maus (Windows SendInput), z. B. für Spiel-Kamera. "
-                "Minecraft: idealerweise im Spiel-Fokus; ggf. Tool als Administrator starten."
-            ),
-            foreground="#555555",
-            wraplength=420,
-            justify="left",
-        )
-        hint.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
-
         frame.columnconfigure(0, weight=1)
 
     def _on_slider(self, val: str) -> None:
-        try:
-            self.speed_var.set(int(float(val)))
-        finally:
-            self._set_status()
+        self.speed_var.set(int(float(val)))
+        self._set_status()
 
     def _sync_internal_state(self) -> None:
         with self._state_lock:
@@ -162,6 +152,7 @@ class MacroApp:
     def _smooth_drag_loop(self) -> None:
         last = time.perf_counter()
         tick = 1.0 / 120.0
+
         while not self._stop_smooth.wait(timeout=tick):
             now = time.perf_counter()
             dt = min(now - last, 0.05)
@@ -171,15 +162,18 @@ class MacroApp:
                 enabled = self._macro_enabled
                 speed = float(self._macro_speed)
 
-            if not enabled or not self._left_down:
+            # <-- GEÄNDERT: beide Buttons müssen gedrückt sein
+            if not enabled or not (self._left_down and self._right_down):
                 self._accum_y = 0.0
                 continue
 
             self._accum_y += speed * dt
             step = int(self._accum_y)
             self._accum_y -= step
+
             if step == 0:
                 continue
+
             try:
                 if sys.platform == "win32":
                     if not win_send_mouse_relative(0, step):
@@ -200,9 +194,11 @@ class MacroApp:
             self.root.after(0, self._toggle_enabled)
 
     def _on_click(self, x: int, y: int, button: mouse.Button, pressed: bool) -> None:
-        if button != mouse.Button.left:
-            return
-        self._left_down = bool(pressed)
+        if button == mouse.Button.left:
+            self._left_down = bool(pressed)
+        elif button == mouse.Button.right:
+            self._right_down = bool(pressed)
+
         if not pressed:
             self._accum_y = 0.0
 
