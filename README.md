@@ -46,6 +46,15 @@ python app.py
 
 ### Build zur `.exe` (Standalone)
 
+**Einfach (ohne Activate.ps1 / ohne Execution-Policy-Probleme):**
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m PyInstaller --onefile --noconsole --name "ClickMoveDown" app.py
+```
+
+**Oder per Doppelklick:** `build_exe.bat`
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pyinstaller --onefile --noconsole --name "ClickMoveDown" app.py
