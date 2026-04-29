@@ -7,8 +7,33 @@ from tkinter import ttk
 from ctypes import wintypes
 import os
 import configparser
+import json
 
 from pynput import keyboard, mouse
+
+# ==============================
+# SETTINGS (DPI speichern)
+# ==============================
+
+SETTINGS_FILE = "settings.json"
+
+def load_settings():
+    if not os.path.exists(SETTINGS_FILE):
+        return {"dpi": 800}
+
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {"dpi": 800}
+
+
+def save_settings(data):
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except:
+        pass
 
 
 # ==============================
@@ -54,6 +79,10 @@ def load_r6_config():
         print("Config Fehler:", e)
         return None
 
+
+# ==============================
+# SPEED BERECHNUNG
+# ==============================
 
 def calc_speed_from_config(dpi, slider_value):
     data = load_r6_config()
@@ -118,8 +147,12 @@ class MacroApp:
         self.root.title("Click Move Down")
         self.root.resizable(False, False)
 
+        # Settings laden
+        self.settings = load_settings()
+
         self.enabled_var = tk.BooleanVar(value=False)
-        self.speed_var = tk.IntVar(value=100)  # 100 = Standard
+        self.speed_var = tk.IntVar(value=100)
+        self.dpi_var = tk.IntVar(value=self.settings.get("dpi", 800))
         self.status_var = tk.StringVar()
 
         self._mouse_controller = mouse.Controller()
@@ -171,8 +204,13 @@ class MacroApp:
         value = ttk.Label(frame, textvariable=self.speed_var, width=4, anchor="e")
         value.grid(row=3, column=1, sticky="e", padx=(10, 0))
 
+        # 🆕 DPI Feld
+        ttk.Label(frame, text="DPI:").grid(row=4, column=0, sticky="w", pady=(10, 0))
+        dpi_entry = ttk.Entry(frame, textvariable=self.dpi_var, width=10)
+        dpi_entry.grid(row=4, column=1, sticky="e", pady=(10, 0))
+
         status = ttk.Label(frame, textvariable=self.status_var)
-        status.grid(row=4, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        status.grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
         frame.columnconfigure(0, weight=1)
 
@@ -180,17 +218,25 @@ class MacroApp:
         self.speed_var.set(int(float(val)))
         self._set_status()
 
+    def _save_dpi(self):
+        self.settings["dpi"] = self.dpi_var.get()
+        save_settings(self.settings)
+
     def _sync_internal_state(self) -> None:
         with self._state_lock:
             self._macro_enabled = self.enabled_var.get()
 
-            dpi = 1600
+            dpi = self.dpi_var.get()
             self._macro_speed = calc_speed_from_config(dpi, self.speed_var.get())
 
     def _set_status(self) -> None:
+        self._save_dpi()
         self._sync_internal_state()
+
         state = "AN" if self.enabled_var.get() else "AUS"
-        self.status_var.set(f"Status: {state} | Stärke: {self.speed_var.get()}% | Speed: {round(self._macro_speed, 1)}")
+        self.status_var.set(
+            f"Status: {state} | Stärke: {self.speed_var.get()}% | DPI: {self.dpi_var.get()} | Speed: {round(self._macro_speed,1)}"
+        )
 
     def _smooth_drag_loop(self) -> None:
         last = time.perf_counter()
