@@ -5,10 +5,77 @@ import time
 import tkinter as tk
 from tkinter import ttk
 from ctypes import wintypes
+import os
+import configparser
 
 from pynput import keyboard, mouse
 
-# Windows: echte relative Maus-Deltas per SendInput (wie Hardware), nicht nur Desktop-Cursor.
+
+# ==============================
+# CONFIG AUSLESEN (R6)
+# ==============================
+
+def load_r6_config():
+    try:
+        documents = os.path.join(os.path.expanduser("~"), "Documents")
+        base_path = os.path.join(documents, "My Games", "Rainbow Six - Siege")
+
+        if not os.path.exists(base_path):
+            return None
+
+        for folder in os.listdir(base_path):
+            full_path = os.path.join(base_path, folder)
+            if not os.path.isdir(full_path):
+                continue
+
+            config_path = os.path.join(full_path, "GameSettings.ini")
+
+            if not os.path.exists(config_path):
+                continue
+
+            config = configparser.ConfigParser()
+            config.read(config_path)
+
+            if "INPUT" not in config:
+                continue
+
+            sec = config["INPUT"]
+
+            sens = float(sec.get("MouseSensitivity", 30))
+            sens_mult = float(sec.get("MouseSensitivityMultiplierUnit", 0.002))
+            ads = float(sec.get("ADSMouseSensitivityGlobal", 40))
+            ads_mult = float(sec.get("ADSMouseMultiplierUnit", 0.02))
+
+            return sens, sens_mult, ads, ads_mult
+
+        return None
+
+    except Exception as e:
+        print("Config Fehler:", e)
+        return None
+
+
+def calc_speed_from_config(dpi, slider_value):
+    data = load_r6_config()
+    if not data:
+        return slider_value
+
+    sens, sens_mult, ads, ads_mult = data
+
+    base = sens * sens_mult
+    ads_val = ads * ads_mult
+
+    base_speed = dpi * base * ads_val
+
+    slider_multiplier = slider_value / 100.0
+
+    return base_speed * slider_multiplier
+
+
+# ==============================
+# WINDOWS INPUT
+# ==============================
+
 INPUT_MOUSE = 0
 MOUSEEVENTF_MOVE = 0x0001
 
@@ -24,36 +91,10 @@ class MOUSEINPUT(ctypes.Structure):
     )
 
 
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = (
-        ("wVk", wintypes.WORD),
-        ("wScan", wintypes.WORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
-    )
-
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = (
-        ("uMsg", wintypes.DWORD),
-        ("wParamL", wintypes.WORD),
-        ("wParamH", wintypes.WORD),
-    )
-
-
-class INPUT_UNION(ctypes.Union):
-    _fields_ = (
-        ("mi", MOUSEINPUT),
-        ("ki", KEYBDINPUT),
-        ("hi", HARDWAREINPUT),
-    )
-
-
 class INPUT(ctypes.Structure):
     _fields_ = (
         ("type", wintypes.DWORD),
-        ("union", INPUT_UNION),
+        ("mi", MOUSEINPUT),
     )
 
 
@@ -63,11 +104,13 @@ _user32 = ctypes.WinDLL("user32", use_last_error=True)
 def win_send_mouse_relative(dx: int, dy: int) -> bool:
     extra = wintypes.ULONG(0)
     mi = MOUSEINPUT(dx, dy, 0, MOUSEEVENTF_MOVE, 0, ctypes.pointer(extra))
-    inp = INPUT()
-    inp.type = INPUT_MOUSE
-    inp.union.mi = mi
+    inp = INPUT(INPUT_MOUSE, mi)
     return _user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) == 1
 
+
+# ==============================
+# APP
+# ==============================
 
 class MacroApp:
     def __init__(self) -> None:
@@ -76,20 +119,18 @@ class MacroApp:
         self.root.resizable(False, False)
 
         self.enabled_var = tk.BooleanVar(value=False)
-        self.speed_var = tk.IntVar(value=120)
+        self.speed_var = tk.IntVar(value=100)  # 100 = Standard
         self.status_var = tk.StringVar()
 
         self._mouse_controller = mouse.Controller()
-        self._kb_listener: keyboard.Listener | None = None
-        self._mouse_listener: mouse.Listener | None = None
 
         self._left_down = False
-        self._right_down = False  # <-- NEU
+        self._right_down = False
         self._accum_y = 0.0
 
         self._state_lock = threading.Lock()
         self._macro_enabled = False
-        self._macro_speed = 120
+        self._macro_speed = 0
 
         self._stop_smooth = threading.Event()
         self._smooth_thread = threading.Thread(target=self._smooth_drag_loop, daemon=True)
@@ -115,12 +156,12 @@ class MacroApp:
         )
         enabled.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
-        ttk.Label(frame, text="Geschwindigkeit (Pixel/Sekunde):").grid(row=2, column=0, sticky="w")
+        ttk.Label(frame, text="Stärke (%):").grid(row=2, column=0, sticky="w")
 
         slider = ttk.Scale(
             frame,
             from_=10,
-            to=800,
+            to=1000,
             orient="horizontal",
             command=self._on_slider,
         )
@@ -142,12 +183,14 @@ class MacroApp:
     def _sync_internal_state(self) -> None:
         with self._state_lock:
             self._macro_enabled = self.enabled_var.get()
-            self._macro_speed = int(self.speed_var.get())
+
+            dpi = 1600
+            self._macro_speed = calc_speed_from_config(dpi, self.speed_var.get())
 
     def _set_status(self) -> None:
         self._sync_internal_state()
         state = "AN" if self.enabled_var.get() else "AUS"
-        self.status_var.set(f"Status: {state} | {self.speed_var.get()} px/s | Hotkey: # (Fallback: F8)")
+        self.status_var.set(f"Status: {state} | Stärke: {self.speed_var.get()}% | Speed: {round(self._macro_speed, 1)}")
 
     def _smooth_drag_loop(self) -> None:
         last = time.perf_counter()
@@ -162,7 +205,6 @@ class MacroApp:
                 enabled = self._macro_enabled
                 speed = float(self._macro_speed)
 
-            # <-- GEÄNDERT: beide Buttons müssen gedrückt sein
             if not enabled or not (self._left_down and self._right_down):
                 self._accum_y = 0.0
                 continue
@@ -174,57 +216,34 @@ class MacroApp:
             if step == 0:
                 continue
 
-            try:
-                if sys.platform == "win32":
-                    if not win_send_mouse_relative(0, step):
-                        self._mouse_controller.move(0, step)
-                else:
-                    self._mouse_controller.move(0, step)
-            except Exception:
-                pass
+            win_send_mouse_relative(0, step)
 
     def _toggle_enabled(self) -> None:
         self.enabled_var.set(not self.enabled_var.get())
         self._set_status()
 
-    def _on_key_press(self, key: keyboard.Key | keyboard.KeyCode) -> None:
-        is_hash = isinstance(key, keyboard.KeyCode) and key.char == "#"
-        is_fallback = key == keyboard.Key.f8
-        if is_hash or is_fallback:
+    def _on_key_press(self, key):
+        if (hasattr(key, "char") and key.char == "#") or key == keyboard.Key.f8:
             self.root.after(0, self._toggle_enabled)
 
-    def _on_click(self, x: int, y: int, button: mouse.Button, pressed: bool) -> None:
+    def _on_click(self, x, y, button, pressed):
         if button == mouse.Button.left:
-            self._left_down = bool(pressed)
+            self._left_down = pressed
         elif button == mouse.Button.right:
-            self._right_down = bool(pressed)
+            self._right_down = pressed
 
         if not pressed:
             self._accum_y = 0.0
 
-    def _start_listeners(self) -> None:
-        def start_kb() -> None:
-            self._kb_listener = keyboard.Listener(on_press=self._on_key_press)
-            self._kb_listener.start()
+    def _start_listeners(self):
+        keyboard.Listener(on_press=self._on_key_press).start()
+        mouse.Listener(on_click=self._on_click).start()
 
-        def start_mouse() -> None:
-            self._mouse_listener = mouse.Listener(on_click=self._on_click)
-            self._mouse_listener.start()
-
-        threading.Thread(target=start_kb, daemon=True).start()
-        threading.Thread(target=start_mouse, daemon=True).start()
-
-    def _on_close(self) -> None:
+    def _on_close(self):
         self._stop_smooth.set()
-        try:
-            if self._kb_listener is not None:
-                self._kb_listener.stop()
-            if self._mouse_listener is not None:
-                self._mouse_listener.stop()
-        finally:
-            self.root.destroy()
+        self.root.destroy()
 
-    def run(self) -> None:
+    def run(self):
         self.root.mainloop()
 
 
