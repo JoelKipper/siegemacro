@@ -6,6 +6,35 @@ Kleine Windows-App mit UI-Regler:
 - **Wenn aktiv**: bei **Linksklick** wird die Maus um den Reglerwert nach unten bewegt
 - **Toggle**: global mit der Taste **`#`** (zusätzlich **`F8`** als Fallback)
 
+### Python / pip installieren (falls nicht vorhanden)
+
+`pip` kommt bei Windows normalerweise **mit Python** mit.
+
+**Option A: per winget (empfohlen)**
+
+```powershell
+winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+```
+
+Danach ein **neues** PowerShell-Fenster öffnen und prüfen:
+
+```powershell
+python --version
+python -m pip --version
+```
+
+**Option B: Installer von python.org**
+
+- Python 3.11+ (64-bit) installieren
+- Im Installer anhaken: **Add python.exe to PATH**
+
+**Wenn `python` dich in den Microsoft Store umleitet**
+
+Windows Alias deaktivieren:
+
+- Settings → Apps → Advanced app settings → App execution aliases
+- **python.exe** und **python3.exe** → **Off**
+
 ### Setup (Entwicklung)
 
 ```powershell
